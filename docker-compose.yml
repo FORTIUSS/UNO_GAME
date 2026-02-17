@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  # UNO Game Backend
+  uno-backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: uno-game-backend
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+      PORT: 3000
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID:-your-project-id}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY:-your-private-key}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL:-your-email@appspot.gserviceaccount.com}
+      FIREBASE_DATABASE_URL: ${FIREBASE_DATABASE_URL:-https://your-project.firebaseio.com}
+      JWT_SECRET: ${JWT_SECRET:-dev-secret-key-change-in-production}
+      ALLOWED_ORIGINS: http://localhost:3000,http://localhost:5173,http://localhost:8080
+      LOG_LEVEL: debug
+    volumes:
+      - ./backend/src:/app/src
+      - ./backend/node_modules:/app/node_modules
+    networks:
+      - uno-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+    depends_on:
+      - firebase-emulator
+
+  # Firebase Emulator Suite (optional, for local development)
+  firebase-emulator:
+    image: google.cloud.artifactregistry.oss.images/firebase-emulator-suite:latest
+    container_name: firebase-emulator
+    ports:
+      - "4000:4000"  # Emulator UI
+      - "9099:9099"  # Auth emulator
+      - "8080:8080"  # Firestore emulator
+      - "9000:9000"  # Realtime Database emulator
+      - "5001:5001"  # Storage emulator
+    environment:
+      FIREBASE_DATABASE_EMULATOR_HOST: localhost:9000
+      FIREBASE_AUTH_EMULATOR_HOST: localhost:9099
+      FIRESTORE_EMULATOR_HOST: localhost:8080
+    networks:
+      - uno-network
+    volumes:
+      - ./firebase-data:/root/.cache
+    profiles:
+      - emulator  # Run with: docker-compose --profile emulator up
+
+  # Redis (optional, for production scaling)
+  redis:
+    image: redis:7-alpine
+    container_name: uno-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    networks:
+      - uno-network
+    volumes:
+      - redis-data:/data
+    profiles:
+      - production
+
+  # PostgreSQL (optional, for additional data storage)
+  postgres:
+    image: postgres:15-alpine
+    container_name: uno-postgres
+    environment:
+      POSTGRES_DB: uno_game
+      POSTGRES_USER: uno_user
+      POSTGRES_PASSWORD: uno_password
+    ports:
+      - "5432:5432"
+    networks:
+      - uno-network
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    profiles:
+      - production
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: uno-nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - uno-backend
+    networks:
+      - uno-network
+    profiles:
+      - production
+
+volumes:
+  redis-data:
+  postgres-data:
+
+networks:
+  uno-network:
+    driver: bridge
+
+# Build: docker-compose build
+# Run dev: docker-compose up
+# Run with emulator: docker-compose --profile emulator up
+# Run production setup: docker-compose --profile production up
+# View logs: docker-compose logs -f uno-backend
+# Stop: docker-compose down
